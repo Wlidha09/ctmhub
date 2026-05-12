@@ -1,3 +1,16 @@
 {
-  "placeholderImages": []
+  "placeholderImages": [
+    {
+      "id": "project-logo",
+      "description": "CTM Hub Professional Logo",
+      "imageUrl": "https://picsum.photos/seed/ctm-logo/200/200",
+      "imageHint": "professional emerald logo"
+    },
+    {
+      "id": "avatar-1",
+      "description": "Employee Avatar",
+      "imageUrl": "https://picsum.photos/seed/emp1/100/100",
+      "imageHint": "professional headshot"
+    }
+  ]
 }
