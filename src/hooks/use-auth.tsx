@@ -1,84 +1,116 @@
+
 "use client"
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { UserProfile, UserRole } from '@/app/lib/roles';
+import { useAuth as useFirebaseAuth, useFirestore } from '@/firebase';
+import { 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signOut, 
+  onAuthStateChanged,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface AuthContextType {
   user: UserProfile | null;
   loading: boolean;
-  login: () => void;
-  logout: () => void;
-  completeOnboarding: (data: Partial<UserProfile>) => void;
+  login: () => Promise<void>;
+  logout: () => Promise<void>;
+  completeOnboarding: (data: Partial<UserProfile>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-// Mock user for initial demo
-const MOCK_USER: UserProfile = {
-  id: '1',
-  email: 'john.doe@ctmhub.com',
-  name: 'John Doe',
-  role: 'Owner',
-  department: 'Direction',
-  dob: '1985-06-15',
-  phone: '+216 22 333 444',
-  officeDaysPerWeek: 3,
-  avatarUrl: 'https://picsum.photos/seed/ctm-owner/100/100',
-  onboardingCompleted: true,
-};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+  
+  const auth = useFirebaseAuth();
+  const db = useFirestore();
 
   useEffect(() => {
-    // Simulate auth check
-    const timer = setTimeout(() => {
-      // In a real app, check localStorage or Firebase state
-      const savedUser = localStorage.getItem('ctm_user');
-      if (savedUser) {
-        setUser(JSON.parse(savedUser));
+    if (!auth || !db) return;
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Fetch profile from Firestore
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        const userSnap = await getDoc(userRef);
+
+        if (userSnap.exists()) {
+          const profile = userSnap.data() as UserProfile;
+          setUser(profile);
+        } else {
+          // Create a temporary profile for onboarding
+          const initialProfile: UserProfile = {
+            id: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            name: firebaseUser.displayName || '',
+            role: 'Employee',
+            department: 'IT',
+            dob: '',
+            phone: '',
+            officeDaysPerWeek: 3,
+            avatarUrl: firebaseUser.photoURL || `https://picsum.photos/seed/${firebaseUser.uid}/100/100`,
+            onboardingCompleted: false,
+          };
+          setUser(initialProfile);
+        }
+      } else {
+        setUser(null);
       }
       setLoading(false);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, []);
+    });
+
+    return () => unsubscribe();
+  }, [auth, db]);
 
   useEffect(() => {
-    if (!loading && !user && pathname !== '/' && !pathname.startsWith('/auth')) {
-      // Not logged in, redirect to login
-      // router.push('/'); // Commented out for dev flexibility
-    } else if (!loading && user && !user.onboardingCompleted && pathname !== '/onboarding') {
-      router.push('/onboarding');
+    if (!loading) {
+      if (!user && pathname !== '/' && !pathname.startsWith('/auth')) {
+        // Rediriger vers l'accueil si non connecté
+        router.push('/');
+      } else if (user && !user.onboardingCompleted && pathname !== '/onboarding') {
+        // Forcer l'onboarding si incomplet
+        router.push('/onboarding');
+      }
     }
   }, [user, loading, pathname, router]);
 
-  const login = () => {
-    // Mock login with Google
-    const newUser: UserProfile = {
-      ...MOCK_USER,
-      onboardingCompleted: false, // Force onboarding for new login
-      role: 'Employee' // Default role for new users
-    };
-    setUser(newUser);
-    localStorage.setItem('ctm_user', JSON.stringify(newUser));
-    router.push('/onboarding');
+  const login = async () => {
+    if (!auth) return;
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Erreur de connexion Google:", error);
+    }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('ctm_user');
-    router.push('/');
+  const logout = async () => {
+    if (!auth) return;
+    try {
+      await signOut(auth);
+      router.push('/');
+    } catch (error) {
+      console.error("Erreur de déconnexion:", error);
+    }
   };
 
-  const completeOnboarding = (data: Partial<UserProfile>) => {
-    if (!user) return;
+  const completeOnboarding = async (data: Partial<UserProfile>) => {
+    if (!user || !db) return;
     const updatedUser = { ...user, ...data, onboardingCompleted: true };
+    
+    // Save to Firestore
+    const userRef = doc(db, 'users', user.id);
+    await setDoc(userRef, updatedUser);
+    
     setUser(updatedUser);
-    localStorage.setItem('ctm_user', JSON.stringify(updatedUser));
     router.push('/dashboard');
   };
 
